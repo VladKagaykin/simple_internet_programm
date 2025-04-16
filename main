@@ -1,0 +1,74 @@
+#include <iostream>
+#include <boost/asio.hpp>
+
+// Корректированная функция для получения внешнего IP
+std::string get_external_ip() {
+    try {
+        boost::asio::io_service io_service;
+        boost::asio::ip::tcp::resolver resolver(io_service);
+        boost::asio::ip::tcp::resolver::query query("ifconfig.me", "80");
+        boost::asio::ip::tcp::resolver::iterator endpoint_iterator = resolver.resolve(query);
+
+        boost::asio::ip::tcp::socket socket(io_service);
+        boost::asio::connect(socket, endpoint_iterator);
+
+        // Простой HTTP-запрос для получения чистого IP
+        std::string request = "GET /ip HTTP/1.1\r\n"
+                              "Host: ifconfig.me\r\n"
+                              "Connection: close\r\n\r\n";
+        boost::asio::write(socket, boost::asio::buffer(request));
+
+        // Читаем ответ до конца (до закрытия сокета)
+        boost::asio::streambuf response;
+        boost::asio::read_until(socket, response, "\r\n\r\n"); // читать до конца заголовков
+        boost::asio::read_until(socket, response, "\r\n");     // дочитывать остаток (сам IP)
+
+        // Полностью преобразовать буфер в строку
+        std::stringstream ss;
+        ss << &response;
+        std::string full_response = ss.str();
+
+        // Найдем начало тела ответа (IP находится после всех заголовков)
+        size_t pos = full_response.find("\r\n\r\n");
+        if(pos != std::string::npos) {
+            std::string ip_address = full_response.substr(pos+4); // "+4" для удаления символов перевода строки
+            return ip_address;
+        }
+    } catch (std::exception& e) {
+        std::cerr << "Ошибка: " << e.what() << std::endl;
+    }
+    return "Не удалось получить внешний IP";
+}
+
+int main() {
+    try {
+        boost::asio::io_service io_service;
+
+        // Имя хоста
+        std::string hostname = boost::asio::ip::host_name();
+        std::cout << "Имя хоста: " << hostname << std::endl;
+
+        // Внутренние IP
+        boost::asio::ip::tcp::resolver resolver(io_service);
+        boost::asio::ip::tcp::resolver::query query(hostname, "");
+        boost::asio::ip::tcp::resolver::iterator endpoints = resolver.resolve(query);
+
+        std::cout << "Внутренние IP-адреса:\n";
+        for (; endpoints != boost::asio::ip::tcp::resolver::iterator(); ++endpoints) {
+            const auto addr = endpoints->endpoint().address();
+            if (addr.is_v4())
+                std::cout << "IPv4: " << addr.to_string() << '\n';
+            else if (addr.is_v6())
+                std::cout << "IPv6: " << addr.to_string() << '\n';
+        }
+
+        // Внешний IP
+        std::string external_ip = get_external_ip();
+        std::cout << "Ваш внешний IP-адрес: " << external_ip << std::endl;
+
+    } catch (std::exception& ex) {
+        std::cerr << "Исключение: " << ex.what() << std::endl;
+    }
+
+    return 0;
+}
