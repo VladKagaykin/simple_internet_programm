@@ -1,7 +1,7 @@
 #include <iostream>
+#include <vector>
 #include <boost/asio.hpp>
 
-// Корректированная функция для получения внешнего IP
 std::string get_external_ip() {
     try {
         boost::asio::io_service io_service;
@@ -12,26 +12,22 @@ std::string get_external_ip() {
         boost::asio::ip::tcp::socket socket(io_service);
         boost::asio::connect(socket, endpoint_iterator);
 
-        // Простой HTTP-запрос для получения чистого IP
         std::string request = "GET /ip HTTP/1.1\r\n"
                               "Host: ifconfig.me\r\n"
                               "Connection: close\r\n\r\n";
         boost::asio::write(socket, boost::asio::buffer(request));
 
-        // Читаем ответ до конца (до закрытия сокета)
         boost::asio::streambuf response;
-        boost::asio::read_until(socket, response, "\r\n\r\n"); // читать до конца заголовков
-        boost::asio::read_until(socket, response, "\r\n");     // дочитывать остаток (сам IP)
+        boost::asio::read_until(socket, response, "\r\n\r\n");
+        boost::asio::read_until(socket, response, "\r\n");
 
-        // Полностью преобразовать буфер в строку
         std::stringstream ss;
         ss << &response;
         std::string full_response = ss.str();
 
-        // Найдем начало тела ответа (IP находится после всех заголовков)
         size_t pos = full_response.find("\r\n\r\n");
         if(pos != std::string::npos) {
-            std::string ip_address = full_response.substr(pos+4); // "+4" для удаления символов перевода строки
+            std::string ip_address = full_response.substr(pos+4);
             return ip_address;
         }
     } catch (std::exception& e) {
@@ -40,15 +36,15 @@ std::string get_external_ip() {
     return "Не удалось получить внешний IP";
 }
 
-int ip(){
+
+
+int ip() {
     try {
         boost::asio::io_service io_service;
 
-        // Имя хоста
         std::string hostname = boost::asio::ip::host_name();
         std::cout << "Имя хоста: " << hostname << std::endl;
 
-        // Внутренние IP
         boost::asio::ip::tcp::resolver resolver(io_service);
         boost::asio::ip::tcp::resolver::query query(hostname, "");
         boost::asio::ip::tcp::resolver::iterator endpoints = resolver.resolve(query);
@@ -62,7 +58,6 @@ int ip(){
                 std::cout << "IPv6: " << addr.to_string() << '\n';
         }
 
-        // Внешний IP
         std::string external_ip = get_external_ip();
         std::cout << "Ваш внешний IP-адрес: " << external_ip << std::endl;
 
@@ -72,6 +67,76 @@ int ip(){
 
     return 0;
 }
+
+
+
+void scan_local_network() {
+    try {
+        boost::asio::io_service io_service;
+        std::vector<std::string> local_ips;
+        std::string hostname = boost::asio::ip::host_name();
+        boost::asio::ip::tcp::resolver resolver(io_service);
+        boost::asio::ip::tcp::resolver::query query(hostname, "");
+        boost::asio::ip::tcp::resolver::iterator endpoints = resolver.resolve(query);
+
+        for (; endpoints != boost::asio::ip::tcp::resolver::iterator(); ++endpoints) {
+            auto addr = endpoints->endpoint().address();
+            if (addr.is_v4()) {
+                local_ips.push_back(addr.to_string());
+            }
+        }
+
+        if (local_ips.empty()) return;
+
+        std::string base_ip = local_ips[0].substr(0, local_ips[0].rfind('.') + 1);
+        std::cout << "\nСканирование локальной сети (" << base_ip << "X):\n";
+
+        for (int i = 1; i < 255; ++i) {
+            std::string target_ip = base_ip + std::to_string(i);
+            boost::asio::ip::tcp::endpoint ep(
+                boost::asio::ip::make_address_v4(target_ip), 80);
+
+            // Проверка доступности
+            boost::asio::ip::tcp::socket socket(io_service);
+            boost::asio::deadline_timer timer(io_service);
+            bool connected = false;
+
+            socket.async_connect(ep, [&](auto) { connected = true; });
+            timer.expires_from_now(boost::posix_time::milliseconds(500));
+            timer.async_wait([&](auto) { socket.close(); });
+
+            io_service.reset();
+            io_service.run_one();
+
+            if (connected) {
+                try {
+                    // Исправленный DNS-запрос
+                    boost::asio::ip::tcp::resolver dns_resolver(io_service);
+                    boost::asio::ip::tcp::resolver::query dns_query(
+                        boost::asio::ip::tcp::v4(),
+                        target_ip,
+                        ""
+                    );
+
+                    auto it = dns_resolver.resolve(dns_query);
+                    if(it != boost::asio::ip::tcp::resolver::iterator()) {
+                        std::string hostname = it->host_name();
+                        if(hostname != target_ip) {
+                            std::cout << target_ip << " - " << hostname << '\n';
+                        } else {
+                            std::cout << target_ip << " - имя совпадает с IP\n";
+                        }
+                    }
+                } catch (boost::system::system_error& e) {
+                    std::cout << target_ip << " - ошибка DNS: " << e.what() << '\n';
+                }
+            }
+        }
+    } catch (...) {}
+}
+
 int main() {
     ip();
+    scan_local_network();
+    return 0;
 }
