@@ -40,7 +40,7 @@ std::string get_external_ip() {
     return "Не удалось получить внешний IP";
 }
 
-int main() {
+int ip(){
     try {
         boost::asio::io_service io_service;
 
@@ -71,4 +71,7 @@ int main() {
     }
 
     return 0;
+}
+int main() {
+    ip();
 }
