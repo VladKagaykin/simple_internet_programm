@@ -36,30 +36,48 @@ std::string get_external_ip() {
     return "Не удалось получить внешний IP";
 }
 
+std::string host(){
+    std::string hostname = boost::asio::ip::host_name();
+    return hostname;
+}
 
+std::string ipv4(){
+    boost::asio::ip::tcp::resolver resolver(io_service);
+    boost::asio::ip::tcp::resolver::query query(host(), "");
+    boost::asio::ip::tcp::resolver::iterator endpoints = resolver.resolve(query);
+    
+    for (; endpoints != boost::asio::ip::tcp::resolver::iterator(); ++endpoints) {
+        const auto addr = endpoints->endpoint().address();
+        if (addr.is_v4()){
+            return addr.to_string();
+        }
+    }
+}
+
+std::string ipv6(){
+    boost::asio::ip::tcp::resolver resolver(io_service);
+    boost::asio::ip::tcp::resolver::query query(host(), "");
+    boost::asio::ip::tcp::resolver::iterator endpoints = resolver.resolve(query);
+    
+    for (; endpoints != boost::asio::ip::tcp::resolver::iterator(); ++endpoints) {
+        const auto addr = endpoints->endpoint().address();
+        if (addr.is_v6()){
+            return addr.to_string();
+        }
+    }
+}
 
 int ip() {
     try {
         boost::asio::io_service io_service;
-
-        std::string hostname = boost::asio::ip::host_name();
-        std::cout << "Имя хоста: " << hostname << std::endl;
-
-        boost::asio::ip::tcp::resolver resolver(io_service);
-        boost::asio::ip::tcp::resolver::query query(hostname, "");
-        boost::asio::ip::tcp::resolver::iterator endpoints = resolver.resolve(query);
+        
+        std::cout << "Имя хоста: " << host() << std::endl;
 
         std::cout << "Внутренние IP-адреса:\n";
-        for (; endpoints != boost::asio::ip::tcp::resolver::iterator(); ++endpoints) {
-            const auto addr = endpoints->endpoint().address();
-            if (addr.is_v4())
-                std::cout << "IPv4: " << addr.to_string() << '\n';
-            else if (addr.is_v6())
-                std::cout << "IPv6: " << addr.to_string() << '\n';
-        }
-
-        std::string external_ip = get_external_ip();
-        std::cout << "Ваш внешний IP-адрес: " << external_ip << std::endl;
+        std::cout << "IPv4: " << ipv4() << std::endl;
+        std::cout << "IPv6: " << ipv6() << std::endl;
+        
+        std::cout << "Ваш внешний IP-адрес: " << get_external_ip() << std::endl;
 
     } catch (std::exception& ex) {
         std::cerr << "Исключение: " << ex.what() << std::endl;
@@ -135,8 +153,44 @@ void scan_local_network() {
     } catch (...) {}
 }
 
+int help(){
+    std::cout << "help - это меню(удивительно)" << std::endl;
+    std::cout << "exit - выйти" << std::endl;
+    std::cout << "host - имя хоста(локальное)" << std::endl;
+    std::cout << "local - ищет все ip в локальной сети и пишет их имена(если есть)" << std::endl;
+    std::cout << "ip - выводит конкретные сведенья об ip" << std::endl;
+    std::cout << "external_ip - выводит только внешний ipv4" << std::endl;
+    std::cout << "ipv4 - выводит только ipv4" << std::endl;
+    std::cout << "ipv6 - выводит только ipv6" << std::endl;
+}
+
+int switch_function(){
+    std::string user;
+    while(user != "exit"){
+        std::cin >> user;
+        
+        if(user == "host"){
+            std::cout << host() << std::endl;
+        }
+        else if(user == "local"){
+            scan_local_network();
+        }
+        else if(user == "ip"){
+            std::cout << ip() << std::endl;
+        }
+        else if(user == "external_ip"){
+            std::cout << get_external_ip() << std::endl;
+        }
+        else if(user == "ipv4"){
+            std::cout << ipv4() << std::endl;
+        }
+        else if(user == "ipv6"){
+            std::cout << ipv6() << std::endl;
+        }
+    }
+}
+
 int main() {
-    ip();
-    scan_local_network();
+    switch_function();
     return 0;
 }
