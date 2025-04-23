@@ -84,7 +84,7 @@ std::string ipv6() {
     return "";
 }
 
-int ip() {
+int info_ip() {
     try {
         std::cout << "Имя хоста: " << host() << std::endl;
 
@@ -167,9 +167,9 @@ class VPNServer {
     std::map<std::string, tcp::socket> clients_;
 
 public:
-    VPNServer(io_service& service, short port) 
-        : io_service_(service), 
-          acceptor_(service, tcp::endpoint(tcp::v4(), port)) 
+    VPNServer(io_service& service, short port)
+        : io_service_(service),
+          acceptor_(service, tcp::endpoint(tcp::v4(), port))
     {
         start_accept();
     }
@@ -210,7 +210,7 @@ int switch_function(){
             scan_local_network();
         }
         else if(user == "ip"){
-            ip();
+            info_ip();
         }
         else if(user == "external_ip"){
             std::cout << get_external_ip() << std::endl;
