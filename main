@@ -1,25 +1,32 @@
 #include <iostream>
 #include <vector>
+#include <map>
+#include <thread>
 #include <boost/asio.hpp>
+#include <boost/bind/bind.hpp>
+
+using namespace boost::asio;
+using ip::tcp;
+using namespace std;
 
 std::string get_external_ip() {
     try {
-        boost::asio::io_service io_service;
-        boost::asio::ip::tcp::resolver resolver(io_service);
-        boost::asio::ip::tcp::resolver::query query("ifconfig.me", "80");
-        boost::asio::ip::tcp::resolver::iterator endpoint_iterator = resolver.resolve(query);
+        io_service io_service;
+        tcp::resolver resolver(io_service);
+        tcp::resolver::query query("ifconfig.me", "80");
+        tcp::resolver::iterator endpoint_iterator = resolver.resolve(query);
 
-        boost::asio::ip::tcp::socket socket(io_service);
-        boost::asio::connect(socket, endpoint_iterator);
+        tcp::socket socket(io_service);
+        connect(socket, endpoint_iterator);
 
         std::string request = "GET /ip HTTP/1.1\r\n"
                               "Host: ifconfig.me\r\n"
                               "Connection: close\r\n\r\n";
-        boost::asio::write(socket, boost::asio::buffer(request));
+        write(socket, buffer(request));
 
-        boost::asio::streambuf response;
-        boost::asio::read_until(socket, response, "\r\n\r\n");
-        boost::asio::read_until(socket, response, "\r\n");
+        boost::asio::streambuf response; // Явное указание пространства имен
+        read_until(socket, response, "\r\n\r\n");
+        read_until(socket, response, "\r\n");
 
         std::stringstream ss;
         ss << &response;
@@ -43,11 +50,11 @@ std::string host(){
 
 std::string ipv4() {
     try {
-        boost::asio::io_service io_service;
-        boost::asio::ip::tcp::resolver resolver(io_service);
+        io_service io_service;
+        tcp::resolver resolver(io_service);
         auto endpoints = resolver.resolve(host(), "");
 
-        for (auto it = endpoints; it != boost::asio::ip::tcp::resolver::iterator(); ++it) {
+        for (auto it = endpoints; it != tcp::resolver::iterator(); ++it) {
             const auto addr = it->endpoint().address();
             if (addr.is_v4()) {
                 return addr.to_string();
@@ -61,11 +68,11 @@ std::string ipv4() {
 
 std::string ipv6() {
     try {
-        boost::asio::io_service io_service;
-        boost::asio::ip::tcp::resolver resolver(io_service);
+        io_service io_service;
+        tcp::resolver resolver(io_service);
         auto endpoints = resolver.resolve(host(), "");
 
-        for (auto it = endpoints; it != boost::asio::ip::tcp::resolver::iterator(); ++it) {
+        for (auto it = endpoints; it != tcp::resolver::iterator(); ++it) {
             const auto addr = it->endpoint().address();
             if (addr.is_v6()) {
                 return addr.to_string();
@@ -97,18 +104,16 @@ int ip() {
     return 0;
 }
 
-
-
 void scan_local_network() {
     try {
-        boost::asio::io_service io_service;
+        io_service io_service;
         std::vector<std::string> local_ips;
-        std::string hostname = boost::asio::ip::host_name();
-        boost::asio::ip::tcp::resolver resolver(io_service);
-        boost::asio::ip::tcp::resolver::query query(hostname, "");
-        boost::asio::ip::tcp::resolver::iterator endpoints = resolver.resolve(query);
+        std::string hostname = host();
+        tcp::resolver resolver(io_service);
+        tcp::resolver::query query(hostname, "");
+        tcp::resolver::iterator endpoints = resolver.resolve(query);
 
-        for (; endpoints != boost::asio::ip::tcp::resolver::iterator(); ++endpoints) {
+        for (; endpoints != tcp::resolver::iterator(); ++endpoints) {
             auto addr = endpoints->endpoint().address();
             if (addr.is_v4()) {
                 local_ips.push_back(addr.to_string());
@@ -122,16 +127,14 @@ void scan_local_network() {
 
         for (int i = 1; i < 255; ++i) {
             std::string target_ip = base_ip + std::to_string(i);
-            boost::asio::ip::tcp::endpoint ep(
-                boost::asio::ip::make_address_v4(target_ip), 80);
+            tcp::endpoint ep(ip::make_address_v4(target_ip), 80);
 
-            // Проверка доступности
-            boost::asio::ip::tcp::socket socket(io_service);
-            boost::asio::deadline_timer timer(io_service);
+            tcp::socket socket(io_service);
+            boost::asio::steady_timer timer(io_service); // Исправленный таймер
             bool connected = false;
 
             socket.async_connect(ep, [&](auto) { connected = true; });
-            timer.expires_from_now(boost::posix_time::milliseconds(500));
+            timer.expires_from_now(boost::asio::chrono::milliseconds(500)); // Исправление времени
             timer.async_wait([&](auto) { socket.close(); });
 
             io_service.reset();
@@ -139,16 +142,10 @@ void scan_local_network() {
 
             if (connected) {
                 try {
-                    // Исправленный DNS-запрос
-                    boost::asio::ip::tcp::resolver dns_resolver(io_service);
-                    boost::asio::ip::tcp::resolver::query dns_query(
-                        boost::asio::ip::tcp::v4(),
-                        target_ip,
-                        ""
-                    );
-
+                    tcp::resolver dns_resolver(io_service);
+                    tcp::resolver::query dns_query(tcp::v4(), target_ip, "");
                     auto it = dns_resolver.resolve(dns_query);
-                    if(it != boost::asio::ip::tcp::resolver::iterator()) {
+                    if(it != tcp::resolver::iterator()) {
                         std::string hostname = it->host_name();
                         if(hostname != target_ip) {
                             std::cout << target_ip << " - " << hostname << '\n';
@@ -163,6 +160,31 @@ void scan_local_network() {
         }
     } catch (...) {}
 }
+
+class VPNServer {
+    io_service& io_service_;
+    tcp::acceptor acceptor_;
+    std::map<std::string, tcp::socket> clients_;
+
+public:
+    VPNServer(io_service& service, short port) 
+        : io_service_(service), 
+          acceptor_(service, tcp::endpoint(tcp::v4(), port)) 
+    {
+        start_accept();
+    }
+
+    void start_accept() {
+        auto socket = std::make_shared<tcp::socket>(io_service_);
+        acceptor_.async_accept(*socket, [this, socket](const boost::system::error_code& ec) {
+            if (!ec) {
+                auto& sock_ref = *socket;
+                clients_.emplace("client", std::move(sock_ref)); // Исправление для работы с map
+            }
+            start_accept();
+        });
+    }
+};
 
 int help(){
     std::cout << "help - это меню(удивительно)" << std::endl;
