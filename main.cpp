@@ -256,19 +256,43 @@ void connect_to_vpn(const string& ip, int port, const string& client_name) {
     }
 }
 
+void vpn_server_command(){
+    int port;
+    cout << "Введите порт: ";
+    cin >> port;
+    server_thread = thread(start_vpn_server, port);
+    cout << "VPN сервер запущен на порту " << port << endl;
+}
+
+void vpn_connect_command(){
+    string ip, name;
+    int port;
+    cout << "IP сервера: ";
+    cin >> ip;
+    cout << "Порт: ";
+    cin >> port;
+    cout << "Ваше имя: ";
+    cin >> name;
+    thread(connect_to_vpn, ip, port, name).detach();
+    cout << "Подключение к " << ip << ":" << port << "..." << endl;
+    if(server_thread.joinable()) {
+        server_thread.join();
+    }
+}
+
 // Обновленная справка
 int help() {
     cout << "Список команд:\n"
-         << "  help          - Показать это меню\n"
-         << "  exit          - Выйти из программы\n"
-         << "  host          - Показать имя хоста\n"
-         << "  local         - Сканировать локальную сеть\n"
-         << "  ip            - Показать информацию об IP-адресах\n"
-         << "  external_ip   - Показать внешний IP\n"
-         << "  ipv4          - Показать IPv4 адрес\n"
-         << "  ipv6          - Показать IPv6 адрес\n"
-         << "  vpn_server    - Запустить VPN сервер\n"
-         << "  vpn_connect   - Подключиться к VPN серверу\n";
+         << "help - это меню(удивительно)\n"
+         << "exit - выйти\n"
+         << "host - имя хоста(локальное)\n"
+         << "local - ищет все ip в локальной сети и пишет их имена(если есть)(не работает)\n"
+         << "ip - выводит конкретные сведенья об ip\n"
+         << "external_ip - выводит только внешний ipv4\n"
+         << "ipv4 - выводит только ipv4\n"
+         << "ipv6 - выводит только ipv6\n"
+         << "vpn_server - Запустить VPN сервер\n"
+         << "vpn_connect - Подключиться к VPN серверу\n";
     return 0;
 }
 
@@ -276,9 +300,7 @@ int help() {
 int switch_function() {
     string user;
     while(user != "exit") {
-        cout << "> ";
         cin >> user;
-
         if(user == "host") {
             cout << host() << endl;
         }
@@ -301,38 +323,20 @@ int switch_function() {
             help();
         }
         else if(user == "vpn_server") {
-            int port;
-            cout << "Введите порт: ";
-            cin >> port;
-            server_thread = thread(start_vpn_server, port);
-            cout << "VPN сервер запущен на порту " << port << endl;
+            vpn_server_command();
         }
         else if(user == "vpn_connect") {
-            string ip, name;
-            int port;
-            cout << "IP сервера: ";
-            cin >> ip;
-            cout << "Порт: ";
-            cin >> port;
-            cout << "Ваше имя: ";
-            cin >> name;
-            thread(connect_to_vpn, ip, port, name).detach();
-            cout << "Подключение к " << ip << ":" << port << "..." << endl;
+            vpn_connect_command();
         }
         else if(user != "exit") {
-            cout << "Неизвестная команда. Введите 'help' для списка команд.\n";
+            cout << "Введена некорректная комманда, введите help чтобы узнать список комманд\n";
         }
     }
     
-    if(server_thread.joinable()) {
-        server_thread.join();
-    }
     return 0;
 }
 
 int main() {
-    cout << "Сетевой инструмент с VPN функциями\n";
-    help();
     switch_function();
     return 0;
 }
