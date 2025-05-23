@@ -7,12 +7,12 @@
 #include <boost/bind.hpp>
 #include <boost/asio/streambuf.hpp>
 #include <boost/asio/steady_timer.hpp>
+#include <boost/algorithm/string/trim.hpp>
 
 using namespace boost::asio;
 using ip::tcp;
 using namespace std;
 
-// Функция получения внешнего IP
 string get_external_ip() {
     try {
         io_service io_service;
@@ -44,12 +44,10 @@ string get_external_ip() {
     return "Не удалось получить внешний IP";
 }
 
-// Функция получения имени хоста
 string host() {
     return ip::host_name();
 }
 
-// Функция получения IPv4
 string ipv4() {
     try {
         io_service io_service;
@@ -68,7 +66,6 @@ string ipv4() {
     return "";
 }
 
-// Функция получения IPv6
 string ipv6() {
     try {
         io_service io_service;
@@ -87,7 +84,6 @@ string ipv6() {
     return "";
 }
 
-// Переименованная функция вывода IP-информации
 int show_ip_info() {
     try {
         cout << "Имя хоста: " << host() << endl;
@@ -106,7 +102,6 @@ int show_ip_info() {
     return 0;
 }
 
-// Сканирование локальной сети
 void scan_local_network() {
     try {
         io_service io_service;
@@ -160,17 +155,18 @@ void scan_local_network() {
     } catch (...) {}
 }
 
-// VPN-сервер
 class VPNServer {
     io_service& io_service_;
     tcp::acceptor acceptor_;
     map<string, tcp::socket> clients_;
     string buffer_;
+    string password_;
 
 public:
-    VPNServer(io_service& service, short port) 
+    VPNServer(io_service& service, short port, const string& password) 
         : io_service_(service), 
-          acceptor_(service, tcp::endpoint(tcp::v4(), port)) 
+          acceptor_(service, tcp::endpoint(tcp::v4(), port)),
+          password_(password) 
     {
         start_accept();
     }
@@ -182,10 +178,29 @@ public:
                 async_read_until(*socket, dynamic_buffer(buffer_), "\n",
                     [this, socket](const error_code& ec, size_t) {
                         if (!ec) {
-                            string client_name(buffer_.substr(0, buffer_.find('\n')));
-                            clients_.emplace(client_name, std::move(*socket));
-                            cout << "Клиент подключен: " << client_name << endl;
-                            buffer_.clear();
+                            string received_pass = buffer_.substr(0, buffer_.find('\n'));
+                            boost::algorithm::trim(received_pass);
+                            buffer_.erase(0, buffer_.find('\n') + 1);
+
+                            if (received_pass == password_) {
+                                async_read_until(*socket, dynamic_buffer(buffer_), "\n",
+                                    [this, socket](const error_code& ec, size_t) {
+                                        if (!ec) {
+                                            string client_name = buffer_.substr(0, buffer_.find('\n'));
+                                            boost::algorithm::trim(client_name);
+                                            clients_.emplace(client_name, std::move(*socket));
+                                            cout << "Клиент подключен: " << client_name << endl;
+                                            buffer_.clear();
+                                        } else {
+                                            socket->close();
+                                        }
+                                    });
+                            } else {
+                                cerr << "Неверный пароль от клиента" << endl;
+                                socket->close();
+                            }
+                        } else {
+                            socket->close();
                         }
                     });
             }
@@ -194,7 +209,6 @@ public:
     }
 };
 
-// VPN-клиент
 class VPNClient {
     io_service& io_service_;
     tcp::socket socket_;
@@ -206,15 +220,18 @@ public:
     VPNClient(io_service& service, const string& ip, short port) 
         : io_service_(service), socket_(service), server_ip_(ip), port_(port) {}
 
-    void connect(const string& client_name) {
+    void connect(const string& client_name, const string& password) {
         tcp::resolver resolver(io_service_);
         auto endpoints = resolver.resolve(server_ip_, to_string(port_));
         async_connect(socket_, endpoints, 
-            [this, client_name](const error_code& ec, const tcp::endpoint&) {
+            [this, client_name, password](const error_code& ec, const tcp::endpoint&) {
                 if (!ec) {
-                    async_write(socket_, buffer(client_name + "\n"),
-                        [](const error_code&, size_t) {});
-                    start_receive();
+                    async_write(socket_, buffer(password + "\n" + client_name + "\n"),
+                        [this](const error_code& ec, size_t) {
+                            if (!ec) {
+                                start_receive();
+                            }
+                        });
                 }
             });
     }
@@ -235,21 +252,21 @@ shared_ptr<VPNServer> vpn_server;
 shared_ptr<VPNClient> vpn_client;
 thread server_thread;
 
-void start_vpn_server(int port) {
+void start_vpn_server(int port, const string& password) {
     try {
         io_service service;
-        vpn_server = make_shared<VPNServer>(service, port);
+        vpn_server = make_shared<VPNServer>(service, port, password);
         service.run();
     } catch (exception& e) {
         cerr << "Ошибка сервера: " << e.what() << endl;
     }
 }
 
-void connect_to_vpn(const string& ip, int port, const string& client_name) {
+void connect_to_vpn(const string& ip, int port, const string& client_name, const string& password) {
     try {
         io_service service;
         vpn_client = make_shared<VPNClient>(service, ip, port);
-        vpn_client->connect(client_name);
+        vpn_client->connect(client_name, password);
         service.run();
     } catch (exception& e) {
         cerr << "Ошибка подключения: " << e.what() << endl;
@@ -258,14 +275,17 @@ void connect_to_vpn(const string& ip, int port, const string& client_name) {
 
 void vpn_server_command(){
     int port;
+    string password;
     cout << "Введите порт: ";
     cin >> port;
-    server_thread = thread(start_vpn_server, port);
+    cout << "Введите пароль: ";
+    cin >> password;
+    server_thread = thread(start_vpn_server, port, password);
     cout << "VPN сервер запущен на порту " << port << endl;
 }
 
 void vpn_connect_command(){
-    string ip, name;
+    string ip, name, password;
     int port;
     cout << "IP сервера: ";
     cin >> ip;
@@ -273,14 +293,15 @@ void vpn_connect_command(){
     cin >> port;
     cout << "Ваше имя: ";
     cin >> name;
-    thread(connect_to_vpn, ip, port, name).detach();
+    cout << "Пароль: ";
+    cin >> password;
+    thread(connect_to_vpn, ip, port, name, password).detach();
     cout << "Подключение к " << ip << ":" << port << "..." << endl;
     if(server_thread.joinable()) {
         server_thread.join();
     }
 }
 
-// Обновленная справка
 int help() {
     cout << "Список команд:\n"
          << "help - это меню(удивительно)\n"
@@ -296,7 +317,6 @@ int help() {
     return 0;
 }
 
-// Обработчик команд
 int switch_function() {
     string user;
     while(user != "exit") {
@@ -332,7 +352,6 @@ int switch_function() {
             cout << "Введена некорректная комманда, введите help чтобы узнать список комманд\n";
         }
     }
-    
     return 0;
 }
 
